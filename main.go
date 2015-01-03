@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -29,6 +30,8 @@ func main() {
 		path := parts[0]
 		if path[0] == '_' {
 			path = path[1:]
+		} else {
+			path = filepath.Join(os.Getenv("GOPATH"), "src", path)
 		}
 		lines, ok := fileLines[path]
 		if !ok {
