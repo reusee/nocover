@@ -1,10 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,10 +18,21 @@ func main() {
 	}
 	content, err := ioutil.ReadFile(os.Args[1])
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	entries := strings.Split(string(content), "\n")[1:]
 	fileLines := make(map[string][]string)
+	var pkgInfo struct {
+		Dir        string
+		ImportPath string
+	}
+	output, err := exec.Command("go", "list", "-json").CombinedOutput()
+	if err != nil {
+		panic(err)
+	}
+	if err := json.Unmarshal(output, &pkgInfo); err != nil {
+		panic(err)
+	}
 	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)
 		if !strings.HasSuffix(entry, " 0") {
@@ -31,13 +43,17 @@ func main() {
 		if path[0] == '_' {
 			path = path[1:]
 		} else {
-			path = filepath.Join(os.Getenv("GOPATH"), "src", path)
+			path = strings.TrimPrefix(
+				path,
+				pkgInfo.ImportPath,
+			)
 		}
+		path = filepath.Join(pkgInfo.Dir, path)
 		lines, ok := fileLines[path]
 		if !ok {
 			content, err = ioutil.ReadFile(path)
 			if err != nil {
-				log.Fatal(err)
+				panic(err)
 			}
 			lines = strings.Split(string(content), "\n")
 			fileLines[path] = lines
@@ -45,7 +61,7 @@ func main() {
 		parts = strings.SplitN(parts[1], ".", 2)
 		start, err := strconv.Atoi(parts[0])
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 		if strings.HasSuffix(strings.TrimSpace(lines[start-1]), "NOCOVER") {
 			continue
