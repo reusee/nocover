@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -62,7 +63,13 @@ func main() {
 	ce(err)
 	srcDir := pkg.Dir
 
-	for path, lineNums := range lineByFile {
+	var files []string
+	for path := range lineByFile {
+		files = append(files, path)
+	}
+	sort.Strings(files)
+	for _, path := range files {
+		lineNums := lineByFile[path]
 		path = filepath.Join(srcDir, filepath.Base(path))
 		content, err := os.ReadFile(path)
 		ce(err)
@@ -70,26 +77,77 @@ func main() {
 		file, err := parser.ParseFile(fset, path, content, parser.ParseComments)
 		ce(err)
 
+		// exclude NOCOVER marked blocks
 		for _, group := range file.Comments {
 			for _, comment := range group.List {
-				if nocoverPattern.MatchString(comment.Text) {
-					position := fset.Position(comment.Pos())
-					delete(lineNums, position.Line)
-					nodes, _ := astutil.PathEnclosingInterval(file, comment.Pos(), comment.End())
-					if blockStmt, ok := nodes[0].(*ast.BlockStmt); ok {
-						start := fset.Position(blockStmt.Lbrace).Line
-						end := fset.Position(blockStmt.Rbrace).Line
-						for num := range lineNums {
-							if num >= start && num <= end {
-								delete(lineNums, num)
-							}
-						}
+				if !nocoverPattern.MatchString(comment.Text) {
+					continue
+				}
+				position := fset.Position(comment.Pos())
+				delete(lineNums, position.Line)
+				nodes, _ := astutil.PathEnclosingInterval(file, comment.Pos(), comment.End())
+				blockStmt, ok := nodes[0].(*ast.BlockStmt)
+				if !ok {
+					continue
+				}
+				start := fset.Position(blockStmt.Lbrace).Line
+				end := fset.Position(blockStmt.Rbrace).Line
+				for num := range lineNums {
+					if num >= start && num <= end {
+						delete(lineNums, num)
 					}
 				}
 			}
 		}
 
+		// exclude error checking blocks
+		ast.Inspect(file, func(node ast.Node) bool {
+			// if
+			ifStmt, ok := node.(*ast.IfStmt)
+			if !ok {
+				return true
+			}
+			// bin expr
+			cond, ok := ifStmt.Cond.(*ast.BinaryExpr)
+			if !ok {
+				return true
+			}
+			// err
+			ident, ok := cond.X.(*ast.Ident)
+			if !ok || ident.Name != "err" {
+				return true
+			}
+			// !=
+			if cond.Op != token.NEQ {
+				return true
+			}
+			// nil
+			ident, ok = cond.Y.(*ast.Ident)
+			if !ok || ident.Name != "nil" {
+				return true
+			}
+			// single statement
+			numStmts := len(ifStmt.Body.List)
+			if numStmts > 1 {
+				return true
+			}
+			// exclude
+			start := fset.Position(ifStmt.Body.Lbrace).Line
+			end := fset.Position(ifStmt.Body.Rbrace).Line
+			for num := range lineNums {
+				if num >= start && num <= end {
+					delete(lineNums, num)
+				}
+			}
+			return false
+		})
+
+		var nums []int
 		for num := range lineNums {
+			nums = append(nums, num)
+		}
+		sort.Ints(nums)
+		for _, num := range nums {
 			pt("%s # %d\n", path, num)
 		}
 
