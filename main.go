@@ -139,7 +139,7 @@ func main() {
 					delete(lineNums, num)
 				}
 			}
-			return false
+			return true
 		})
 
 		var nums []int
